@@ -1,17 +1,10 @@
 "use client";
 
+import React, { useEffect, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
+
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
-
-import React, { useEffect, useState } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
-
-export default function ResetPage() {
-  const router = useRouter();
-  const sp = useSearchParams();
-
-import React, { useEffect, useState } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
 
 export default function ResetPage() {
   const router = useRouter();
@@ -36,9 +29,8 @@ export default function ResetPage() {
           throw new Error("Supabase nije inicijalizovan (proveri Vercel env varijable).");
         }
 
-        // Supabase reset flow usually comes with `code` in URL (recommended)
+        // Recommended flow: `code` param in URL
         const code = sp.get("code");
-
         if (code) {
           const { error } = await supabase.auth.exchangeCodeForSession(code);
           if (error) throw error;
@@ -50,7 +42,7 @@ export default function ResetPage() {
           return;
         }
 
-        // Fallback: some setups use access_token (older flows)
+        // Fallback: older flows can use access_token / refresh_token
         const access_token = sp.get("access_token");
         const refresh_token = sp.get("refresh_token");
 
@@ -107,6 +99,7 @@ export default function ResetPage() {
               : "spremno"}
           </b>
         </div>
+
         <div style={{ opacity: 0.9 }}>{msg}</div>
 
         <div style={{ display: "flex", gap: 10, marginTop: 14 }}>
