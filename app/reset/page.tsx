@@ -4,7 +4,6 @@ import React, { useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 
 export const dynamic = "force-dynamic";
-export const revalidate = 0;
 
 export default function ResetPage() {
   const router = useRouter();
@@ -21,15 +20,11 @@ export default function ResetPage() {
         setStatus("working");
         setMsg("Pripremam reset...");
 
-        // ✅ IMPORTANT: dynamic import so Vercel build/prerender can't crash here
         const mod = await import("../../lib/supabase");
         const supabase = (mod as any).supabase;
 
-        if (!supabase) {
-          throw new Error("Supabase nije inicijalizovan (proveri Vercel env varijable).");
-        }
+        if (!supabase) throw new Error("Supabase nije inicijalizovan (proveri Vercel env varijable).");
 
-        // Recommended flow: `code` param in URL
         const code = sp.get("code");
         if (code) {
           const { error } = await supabase.auth.exchangeCodeForSession(code);
@@ -42,7 +37,6 @@ export default function ResetPage() {
           return;
         }
 
-        // Fallback: older flows can use access_token / refresh_token
         const access_token = sp.get("access_token");
         const refresh_token = sp.get("refresh_token");
 
