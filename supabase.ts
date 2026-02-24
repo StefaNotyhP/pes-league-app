@@ -1,20 +1,8 @@
 import { createClient } from "@supabase/supabase-js";
 
-const supabaseUrl = (process.env.NEXT_PUBLIC_SUPABASE_URL || "").trim();
-const supabaseAnonKey = (process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "").trim();
+const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+const anon = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 
-if (!supabaseUrl || !supabaseAnonKey) {
-  throw new Error("Missing NEXT_PUBLIC_SUPABASE_URL or NEXT_PUBLIC_SUPABASE_ANON_KEY in .env.local");
-}
-
-if (!/^https?:\/\/.+/i.test(supabaseUrl)) {
-  throw new Error(`Invalid NEXT_PUBLIC_SUPABASE_URL: "${supabaseUrl}"`);
-}
-
-export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
-  auth: {
-    persistSession: true,
-    autoRefreshToken: true,
-    detectSessionInUrl: true,
-  },
-});
+// ✅ During build/prerender on Vercel, env can be missing in some steps.
+// We return a "safe" client only when env is present.
+export const supabase = url && anon ? createClient(url, anon) : (null as any);
