@@ -1,229 +1,134 @@
 "use client";
-export const dynamic = "force-dynamic";
-import React, { useEffect, useMemo, useState } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
-import { supabase } from "@/lib/supabase";
 
-function cx(...cls: Array<string | false | null | undefined>) {
-  return cls.filter(Boolean).join(" ");
-}
+import React, { useEffect, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 
 export default function ResetPage() {
   const router = useRouter();
   const sp = useSearchParams();
 
-  const code = sp.get("code"); // supabase redirect param (PKCE)
-  const type = sp.get("type"); // invite | recovery | magiclink (varira)
-  const tournamentId = sp.get("t"); // mi šaljemo ?t=...
-
-  const [step, setStep] = useState<"exchanging" | "setpw" | "done" | "error">(
-    "exchanging"
-  );
-  const [msg, setMsg] = useState<string>("Učitavam link...");
-
-  const [pw1, setPw1] = useState("");
-  const [pw2, setPw2] = useState("");
-  const [saving, setSaving] = useState(false);
-
-  const title = useMemo(() => {
-    if (type === "invite") return "Aktivacija naloga";
-    if (type === "recovery") return "Reset lozinke";
-    return "Prijava / Aktivacija";
-  }, [type]);
+  const [status, setStatus] = useState<"idle" | "working" | "ok" | "error">("idle");
+  const [msg, setMsg] = useState<string>("");
 
   useEffect(() => {
-    const run = async () => {
+    let cancelled = false;
+
+    async function run() {
       try {
-        setMsg("Validiram link...");
+        setStatus("working");
+        setMsg("Pripremam reset...");
 
-        // 1) Ako nema code, ovo nije validan Supabase email redirect
-        if (!code) {
-          setStep("error");
-          setMsg("Neispravan link (nema code parametra). Otvori link iz emaila ponovo.");
+        // ✅ IMPORTANT: dynamic import so Vercel build/prerender can't crash here
+        const mod = await import("../../lib/supabase");
+        const supabase = (mod as any).supabase;
+
+        if (!supabase) {
+          throw new Error("Supabase nije inicijalizovan (proveri Vercel env varijable).");
+        }
+
+        // Supabase reset flow usually comes with `code` in URL (recommended)
+        const code = sp.get("code");
+
+        if (code) {
+          const { error } = await supabase.auth.exchangeCodeForSession(code);
+          if (error) throw error;
+
+          if (!cancelled) {
+            setStatus("ok");
+            setMsg("Reset link je potvrđen. Možeš da postaviš novu lozinku.");
+          }
           return;
         }
 
-        // 2) Exchange code -> session
-        const { error } = await supabase.auth.exchangeCodeForSession(code);
-        if (error) {
-          setStep("error");
-          setMsg("Greška pri logovanju preko linka: " + error.message);
+        // Fallback: some setups use access_token (older flows)
+        const access_token = sp.get("access_token");
+        const refresh_token = sp.get("refresh_token");
+
+        if (access_token && refresh_token) {
+          const { error } = await supabase.auth.setSession({ access_token, refresh_token });
+          if (error) throw error;
+
+          if (!cancelled) {
+            setStatus("ok");
+            setMsg("Sesija postavljena. Možeš da postaviš novu lozinku.");
+          }
           return;
         }
 
-        // 3) Sad user ima session, može da postavi password
-        setStep("setpw");
-        setMsg("Postavi novu lozinku.");
+        if (!cancelled) {
+          setStatus("error");
+          setMsg("Nedostaje reset token u linku (code ili access_token).");
+        }
       } catch (e: any) {
-        setStep("error");
-        setMsg("Greška: " + (e?.message ?? "unknown"));
+        if (!cancelled) {
+          setStatus("error");
+          setMsg(e?.message || "Greška pri resetu.");
+        }
       }
-    };
+    }
 
     run();
-  }, [code]);
-
-  async function savePassword() {
-    if (saving) return;
-
-    if (pw1.length < 6) {
-      setMsg("Lozinka mora imati bar 6 karaktera.");
-      return;
-    }
-    if (pw1 !== pw2) {
-      setMsg("Lozinke se ne poklapaju.");
-      return;
-    }
-
-    setSaving(true);
-    setMsg(null as any);
-
-    const { error } = await supabase.auth.updateUser({ password: pw1 });
-    if (error) {
-      setSaving(false);
-      setMsg("Greška pri snimanju lozinke: " + error.message);
-      return;
-    }
-
-    // ✅ zapamti aktivni turnir (ako je prosleđen)
-    if (tournamentId) {
-      try {
-        window.localStorage.setItem("activeTournamentId", tournamentId);
-      } catch {}
-    }
-
-    setStep("done");
-    setMsg("✅ Sačuvano. Prebacujem te na dashboard...");
-
-    // mali delay da user vidi poruku
-    setTimeout(() => {
-      router.replace("/dashboard");
-    }, 600);
-  }
+    return () => {
+      cancelled = true;
+    };
+  }, [sp]);
 
   return (
-    <div className="wrap">
-      <div className="card">
-        <h1 className="h1">{title}</h1>
+    <div style={{ maxWidth: 520, margin: "40px auto", padding: 16 }}>
+      <h1 style={{ fontSize: 22, fontWeight: 900, marginBottom: 10 }}>Reset lozinke</h1>
 
-        {step === "exchanging" && <p className="muted">{msg}</p>}
+      <div
+        style={{
+          border: "1px solid rgba(255,255,255,0.12)",
+          borderRadius: 14,
+          padding: 14,
+          background: "rgba(255,255,255,0.04)",
+        }}
+      >
+        <div style={{ marginBottom: 10 }}>
+          Status:{" "}
+          <b>
+            {status === "working"
+              ? "obrađujem…"
+              : status === "ok"
+              ? "OK"
+              : status === "error"
+              ? "greška"
+              : "spremno"}
+          </b>
+        </div>
+        <div style={{ opacity: 0.9 }}>{msg}</div>
 
-        {step === "error" && (
-          <>
-            <p className="err">{msg}</p>
-            <p className="muted">
-              Tip: proveri da je Auth Redirect URL u Supabase podešen i da otvaraš
-              poslednji email link.
-            </p>
-          </>
-        )}
+        <div style={{ display: "flex", gap: 10, marginTop: 14 }}>
+          <button
+            onClick={() => router.push("/login")}
+            style={{
+              padding: "10px 12px",
+              borderRadius: 12,
+              border: "1px solid rgba(255,255,255,0.18)",
+              background: "rgba(255,255,255,0.06)",
+              cursor: "pointer",
+              fontWeight: 700,
+            }}
+          >
+            Nazad na login
+          </button>
 
-        {step === "setpw" && (
-          <>
-            <p className="muted">
-              {type === "invite"
-                ? "Dobio si invite. Postavi lozinku da aktiviraš nalog."
-                : "Postavi novu lozinku."}
-            </p>
-
-            <div className="form">
-              <input
-                className="inp"
-                type="password"
-                placeholder="Nova lozinka (min 6)"
-                value={pw1}
-                onChange={(e) => setPw1(e.target.value)}
-              />
-              <input
-                className="inp"
-                type="password"
-                placeholder="Ponovi lozinku"
-                value={pw2}
-                onChange={(e) => setPw2(e.target.value)}
-              />
-              <button className={cx("btn", saving && "btnDis")} onClick={savePassword} disabled={saving}>
-                {saving ? "Čuvam..." : "Sačuvaj lozinku"}
-              </button>
-              {msg ? <p className={msg.startsWith("Greška") ? "err" : "muted"}>{msg}</p> : null}
-            </div>
-          </>
-        )}
-
-        {step === "done" && <p className="ok">{msg}</p>}
+          <button
+            onClick={() => router.push("/dashboard")}
+            style={{
+              padding: "10px 12px",
+              borderRadius: 12,
+              border: "1px solid rgba(255,255,255,0.18)",
+              background: "rgba(255,255,255,0.10)",
+              cursor: "pointer",
+              fontWeight: 700,
+            }}
+          >
+            Idi na dashboard
+          </button>
+        </div>
       </div>
-
-      <style jsx>{`
-        .wrap {
-          min-height: 100vh;
-          display: grid;
-          place-items: center;
-          padding: 24px;
-          background: radial-gradient(900px 500px at 20% 0%, rgba(124, 215, 255, 0.18), transparent 55%),
-            radial-gradient(800px 400px at 90% 20%, rgba(255, 124, 155, 0.14), transparent 55%),
-            #0b0d12;
-          color: rgba(255, 255, 255, 0.92);
-        }
-        .card {
-          width: 100%;
-          max-width: 520px;
-          border: 1px solid rgba(255, 255, 255, 0.14);
-          background: rgba(255, 255, 255, 0.06);
-          border-radius: 18px;
-          padding: 18px;
-        }
-        .h1 {
-          margin: 0 0 10px;
-          font-size: 20px;
-          font-weight: 900;
-        }
-        .muted {
-          margin: 10px 0 0;
-          color: rgba(255, 255, 255, 0.68);
-          font-size: 13px;
-          line-height: 1.4;
-        }
-        .err {
-          margin: 10px 0 0;
-          color: #ff7c9b;
-          font-size: 13px;
-          line-height: 1.4;
-          font-weight: 700;
-        }
-        .ok {
-          margin: 10px 0 0;
-          color: #7cffc2;
-          font-size: 13px;
-          line-height: 1.4;
-          font-weight: 800;
-        }
-        .form {
-          margin-top: 12px;
-          display: grid;
-          gap: 10px;
-        }
-        .inp {
-          height: 42px;
-          padding: 0 12px;
-          border-radius: 12px;
-          border: 1px solid rgba(255, 255, 255, 0.18);
-          background: rgba(0, 0, 0, 0.20);
-          color: rgba(255, 255, 255, 0.92);
-          outline: none;
-        }
-        .btn {
-          height: 42px;
-          border-radius: 12px;
-          border: 1px solid rgba(255, 255, 255, 0.18);
-          background: rgba(255, 255, 255, 0.14);
-          color: rgba(255, 255, 255, 0.92);
-          font-weight: 900;
-          cursor: pointer;
-        }
-        .btnDis {
-          opacity: 0.6;
-          cursor: not-allowed;
-        }
-      `}</style>
     </div>
   );
 }
